@@ -1,1 +1,945 @@
-# Password
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+
+Cusing System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+
+// =====================================================================
+//  ПРАКТИЧЕСКАЯ РАБОТА: Пароли — проверка надёжности и генератор
+//  C#, .NET 8. Весь код — в одном файле Program.cs.
+//
+//  Что умеет программа (меню):
+//    1 — проверить пароль: длина, алфавит, стойкость в битах, оценка,
+//        среднее время перебора при быстром и медленном хранении;
+//    2 — сгенерировать от 1 до 10 паролей (длина 8–64, выбор групп символов);
+//    3 — сгенерировать парольную фразу из случайных слов;
+//    4 — прогнать проверочные расчёты из задания (готовый протокол для отчёта);
+//    0 — выход.
+//
+//  Структура файла:
+//    1) данные программы — массивы популярных паролей и слов;
+//    2) основной код — меню и сценарии пунктов меню;
+//    3) методы — по одному действию на метод, сгруппированы по шагам 1–6.
+//
+//  Главные принципы, которые проверяет преподаватель:
+//    * один метод — одно действие; считающие методы ничего не печатают;
+//    * длину и стойкость считает формула, но словарная проверка важнее:
+//      формула честна только для случайных паролей;
+//    * случайность берётся только из RandomNumberGenerator, не из Random;
+//    * в генерируемом пароле есть символ каждой выбранной группы (проверка
+//      HasAllGroups), и он перемешан алгоритмом Фишера — Йетса (Shuffle).
+// =====================================================================
+
+// Чтобы русский текст правильно печатался в консоли Windows.
+Console.OutputEncoding = Encoding.UTF8;
+
+// ---------------------------------------------------------------------
+//  Данные программы
+// ---------------------------------------------------------------------
+
+// Популярные пароли из открытых списков утечек (RockYou и подобные).
+// Все записаны строчными буквами: сравнение в программе идёт без учёта регистра.
+string[] popularPasswords =
+{
+    "123456", "password", "123456789", "12345678", "12345", "qwerty",
+    "1234567", "111111", "123123", "abc123", "1234567890", "iloveyou",
+    "000000", "654321", "123321", "qwerty123", "1q2w3e4r", "admin",
+    "letmein", "monkey", "dragon", "football", "master", "sunshine",
+    "princess", "welcome", "login", "passw0rd", "qwertyuiop", "1qaz2wsx",
+    "zaq12wsx", "superman", "batman", "trustno1",
+    "йцукен", "пароль"
+};
+
+// Словарь для парольных фраз: 120 существительных (тема — вокруг дома
+// и путешествий). Слова короткие и конкретные: такие легче запомнить.
+string[] phraseDictionary =
+{
+    "кофе", "ветер", "лампа", "тигр", "сахар", "море",
+    "гитара", "облако", "ключ", "роза", "север", "камень",
+    "заяц", "велосипед", "шоколад", "станция", "дождь", "корабль",
+    "перо", "вулкан", "орех", "парус", "музыка", "калитка",
+    "якорь", "банан", "дискета", "фонтан", "лиса", "компас",
+    "тетрадь", "замок", "паутина", "лето", "рюкзак", "сова",
+    "берёза", "черешня", "маяк", "эхо", "персик", "ноябрь",
+    "шарф", "клён", "маршрут", "поле", "сыр", "кувшин",
+    "шмель", "тропинка", "весна", "пингвин", "базар", "озеро",
+    "карандаш", "палитра", "куртка", "портрет", "зеркало", "лимон",
+    "кактус", "вечер", "сойка", "корзина", "гром", "страница",
+    "мостик", "театр", "яблоко", "свеча", "песок", "кит",
+    "фонарь", "пряник", "поляна", "бинокль", "кузнец", "радуга",
+    "кресло", "шиповник", "туман", "кашалот", "жёлудь", "коробка",
+    "камин", "вафля", "паровоз", "лист", "город", "рояль",
+    "улитка", "горчица", "плед", "шалаш", "зонтик", "кедр",
+    "огород", "башня", "валенки", "карамель", "ворона", "пляж",
+    "пасека", "термос", "ящерица", "бублик", "веранда", "снегирь",
+    "купол", "овраг", "ремень", "звезда", "клубок", "монета",
+    "палатка", "флейта", "роса", "чеснок", "трамвай", "капитан"
+};
+
+// =====================================================================
+//  ОСНОВНОЙ КОД: МЕНЮ
+// =====================================================================
+
+while (true)
+{
+    PrintMenu();
+
+    string? line = ReadLineSafe("Ваш выбор: ");
+
+    // ReadLineSafe возвращает null, если ввод закончился (Ctrl+Z или конец файла):
+    // не крутимся в бесконечном цикле, а выходим.
+    if (line == null)
+    {
+        Console.WriteLine("Ввод завершён — выходим из программы.");
+        return;
+    }
+
+    string choice = line.Trim();
+    Console.WriteLine();
+
+    switch (choice)
+    {
+        case "1":
+            PasswordCheckFlow(popularPasswords);
+            break;
+        case "2":
+            PasswordGeneratorFlow(popularPasswords);
+            break;
+        case "3":
+            PassphraseFlow(phraseDictionary);
+            break;
+        case "4":
+            RunSelfChecks(popularPasswords, phraseDictionary);
+            break;
+        case "0":
+            Console.WriteLine("До встречи! Пользуйтесь длинными паролями из менеджера паролей.");
+            return;
+        case "":
+            break;   // пустая строка — просто показать меню ещё раз
+        default:
+            Console.WriteLine("Нет такого пункта меню. Введите число от 0 до 4.");
+            break;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("Нажмите Enter, чтобы вернуться в меню...");
+    ReadLineSafe("");
+}
+
+// =====================================================================
+//  СЦЕНАРИИ (вызываются из меню)
+// =====================================================================
+
+// Пункт 1 меню: проверить пароль, введённый пользователем.
+static void PasswordCheckFlow(string[] popular)
+{
+    Console.WriteLine("ПРОВЕРКА ПАРОЛЯ");
+    Console.WriteLine("Символы будут заменены звёздочками, чтобы пароль не светился на экране.");
+    Console.WriteLine("Можно проверить несколько паролей подряд; пустая строка — вернуться в меню.");
+
+    while (true)
+    {
+        string? password = ReadPassword("Пароль: ");
+
+        // Пустая строка (или конец ввода) — закончили проверку.
+        if (password == null || password.Length == 0) return;
+
+        PrintPasswordReport(password, popular);
+        Console.WriteLine();
+    }
+}
+
+// Пункт 2 меню: сгенерировать один или несколько паролей.
+static void PasswordGeneratorFlow(string[] popular)
+{
+    Console.WriteLine("ГЕНЕРАТОР ПАРОЛЕЙ");
+
+    int length = ReadInt("Длина пароля (8–64), Enter — 16: ", 8, 64, 16);
+
+    bool useLower = AskYesNo("Строчные латинские буквы (д/н), Enter — да: ", true);
+    bool useUpper = AskYesNo("Заглавные латинские буквы (д/н), Enter — да: ", true);
+    bool useDigits = AskYesNo("Цифры (д/н), Enter — да: ", true);
+    bool useSymbols = AskYesNo("Спецсимволы (д/н), Enter — да: ", true);
+
+    string[] groups = BuildGroups(useLower, useUpper, useDigits, useSymbols);
+    if (groups.Length == 0)
+    {
+        Console.WriteLine("Не выбрано ни одной группы символов — генерировать нечего.");
+        return;
+    }
+
+    int count = ReadInt("Сколько паролей сгенерировать (1–10), Enter — 3: ", 1, 10, 3);
+
+    Console.WriteLine();
+    string first = "";
+
+    for (int i = 1; i <= count; i++)
+    {
+        string password = GeneratePassword(length, groups);
+        if (i == 1) first = password;
+
+        double bits = GetBits(password);
+        string check = HasAllGroups(password, groups) ? "все группы на месте" : "ГРУППА ПОТЕРЯЛАСЬ";
+        Console.WriteLine($"  {i}) {password,-24} {Num(bits),6} бит  {GetRating(bits),-13} {check}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("Подробная оценка первого пароля:");
+    PrintPasswordReport(first, popular);
+}
+
+// Пункт 3 меню: сгенерировать парольную фразу.
+static void PassphraseFlow(string[] dictionary)
+{
+    Console.WriteLine("ГЕНЕРАТОР ПАРОЛЬНОЙ ФРАЗЫ");
+    Console.WriteLine($"В словаре {dictionary.Length} слов, это {Num(Math.Log2(dictionary.Length), 2)} бита на слово.");
+
+    int words = ReadInt("Сколько слов в фразе (3–12), Enter — 6: ", 3, 12, 6);
+
+    string phrase = GeneratePassphrase(dictionary, words);
+    double bits = GetPhraseBits(words, dictionary.Length);
+
+    Console.WriteLine();
+    Console.WriteLine($"Фраза: {phrase}");
+    Console.WriteLine($"Длина: {phrase.Length} {Plural(phrase.Length, "символ", "символа", "символов")} (на стойкость не влияет)");
+    Console.WriteLine($"Стойкость: {words} {Plural(words, "слово", "слова", "слов")} × {Num(Math.Log2(dictionary.Length), 2)} = {Num(bits)} бит");
+
+    Console.Write("Оценка: ");
+    PrintColored(GetRating(bits), GetRatingColor(GetRating(bits)));
+
+    Console.WriteLine($"Перебор при быстром хеше (10 млрд/с): {FormatSeconds(GetAverageCrackSeconds(bits, 10_000_000_000))}");
+    Console.WriteLine($"Перебор при медленном хеше (10 тыс/с): {FormatSeconds(GetAverageCrackSeconds(bits, 10_000))}");
+
+    int needOwn = WordsNeededForBits(71.5, dictionary.Length);
+    int needDiceware = WordsNeededForBits(71.5, 7776);
+    Console.WriteLine();
+    Console.WriteLine("Чтобы догнать случайный пароль из 12 символов (71,5 бита), нужно слов:");
+    Console.WriteLine($"  из нашего словаря ({dictionary.Length} слов): {needOwn}");
+    Console.WriteLine($"  по методу Diceware (7776 слов): {needDiceware}");
+}
+
+// Пункт 4 меню: проверочные расчёты, которые идут в отчёт.
+static void RunSelfChecks(string[] popular, string[] dictionary)
+{
+    PrintAlphabetChecks();
+    PrintTheoryTable();
+    PrintSpeedComparison();
+    PrintDictionaryChecks(popular);
+    PrintPhraseChecks(dictionary);
+    PrintGeneratorCheck();
+}
+
+// =====================================================================
+//  МЕТОДЫ: ОБЩЕЕ (вывод, ввод, форматирование)
+// =====================================================================
+
+static void PrintMenu()
+{
+    Console.WriteLine();
+    Console.WriteLine("====================================================");
+    Console.WriteLine("         ПАРОЛИ: ПРОВЕРКА И ГЕНЕРАТОР");
+    Console.WriteLine("====================================================");
+    Console.WriteLine("  1 — проверить пароль");
+    Console.WriteLine("  2 — сгенерировать пароль");
+    Console.WriteLine("  3 — сгенерировать парольную фразу");
+    Console.WriteLine("  4 — проверочные расчёты для отчёта");
+    Console.WriteLine("  0 — выход");
+    Console.WriteLine("----------------------------------------------------");
+}
+
+// Чтение строки. null означает, что ввод закончился (Ctrl+Z или конец файла).
+static string? ReadLineSafe(string prompt)
+{
+    Console.Write(prompt);
+    string? line = Console.ReadLine();
+
+    if (line == null) Console.WriteLine();
+
+    return line;
+}
+
+// Чтение пароля: звёздочки вместо символов. Backspace стирает звёздочку.
+// Если ввод перенаправлен из файла (например, при автопроверке), читаем строку.
+static string? ReadPassword(string prompt)
+{
+    Console.Write(prompt);
+
+    if (Console.IsInputRedirected)
+    {
+        Console.WriteLine();
+        return Console.ReadLine();
+    }
+
+    StringBuilder sb = new StringBuilder();
+
+    while (true)
+    {
+        ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+
+        if (key.Key == ConsoleKey.Enter) break;
+
+        if (key.Key == ConsoleKey.Backspace)
+        {
+            if (sb.Length > 0)
+            {
+                sb.Length--;
+                Console.Write("\b \b");
+            }
+            continue;
+        }
+
+        if (!char.IsControl(key.KeyChar))
+        {
+            sb.Append(key.KeyChar);
+            Console.Write('*');
+        }
+    }
+
+    Console.WriteLine();
+    return sb.ToString();
+}
+
+// Целое число в диапазоне [min, max]; пустой ввод — значение по умолчанию.
+static int ReadInt(string prompt, int min, int max, int defaultValue)
+{
+    while (true)
+    {
+        string? line = ReadLineSafe(prompt);
+
+        if (line == null) return defaultValue;          // ввод закончился
+        if (line.Trim().Length == 0) return defaultValue;
+        line = line.Trim();
+
+        if (int.TryParse(line, out int value) && value >= min && value <= max)
+            return value;
+
+        Console.WriteLine($"Нужно целое число от {min} до {max}. Попробуйте ещё раз.");
+    }
+}
+
+static bool AskYesNo(string prompt, bool defaultValue)
+{
+    while (true)
+    {
+        string? line = ReadLineSafe(prompt);
+
+        if (line == null) return defaultValue;          // ввод закончился
+        string answer = line.Trim().ToLowerInvariant();
+
+        if (answer.Length == 0) return defaultValue;
+        if (answer == "д" || answer == "да" || answer == "y" || answer == "yes") return true;
+        if (answer == "н" || answer == "нет" || answer == "n" || answer == "no") return false;
+
+        Console.WriteLine("Ответьте «д» или «н».");
+    }
+}
+
+// Число в русской записи: десятичная запятая.
+static string Num(double value, int digits = 1)
+{
+    string text = value.ToString("F" + digits, CultureInfo.InvariantCulture);
+    return text.Replace('.', ',');
+}
+
+static void PrintColored(string text, ConsoleColor color)
+{
+    if (Console.IsOutputRedirected)
+    {
+        Console.WriteLine(text);
+        return;
+    }
+
+    Console.ForegroundColor = color;
+    Console.WriteLine(text);
+    Console.ResetColor();
+}
+
+// =====================================================================
+//  ШАГ 1. Размер алфавита
+// =====================================================================
+
+// Сколько разных символов мог использовать автор пароля.
+// 26 — строчные, 26 — заглавные, 10 — цифры, 33 — прочие ASCII,
+// 66 — символы вне ASCII (русские буквы и т.п.).
+static int GetAlphabetSize(string password)
+{
+    int size = 0;
+
+    if (HasCharFrom(password, "abcdefghijklmnopqrstuvwxyz")) size += 26;
+    if (HasCharFrom(password, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")) size += 26;
+    if (HasCharFrom(password, "0123456789")) size += 10;
+    if (HasOtherAsciiSymbol(password)) size += 33;
+    if (HasNonAsciiSymbol(password)) size += 66;
+
+    return size;
+}
+
+// Есть ли в строке хотя бы один символ из набора.
+static bool HasCharFrom(string text, string set)
+{
+    foreach (char c in text)
+    {
+        if (set.Contains(c)) return true;
+    }
+    return false;
+}
+
+// Прочие печатные символы английской раскладки: не буквы и не цифры.
+static bool HasOtherAsciiSymbol(string text)
+{
+    foreach (char c in text)
+    {
+        bool printable = c >= ' ' && c <= '~';
+        bool letterOrDigit = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+        if (printable && !letterOrDigit) return true;
+    }
+    return false;
+}
+
+// Символы вне таблицы ASCII — например, русские буквы.
+static bool HasNonAsciiSymbol(string text)
+{
+    foreach (char c in text)
+    {
+        if (c < ' ' || c > '~') return true;
+    }
+    return false;
+}
+
+// Человеческое описание: какие группы символов есть в пароле.
+static string DescribeGroups(string password)
+{
+    StringBuilder sb = new StringBuilder();
+
+    if (HasCharFrom(password, "abcdefghijklmnopqrstuvwxyz")) sb.Append("строчные, ");
+    if (HasCharFrom(password, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")) sb.Append("заглавные, ");
+    if (HasCharFrom(password, "0123456789")) sb.Append("цифры, ");
+    if (HasOtherAsciiSymbol(password)) sb.Append("прочие ASCII, ");
+    if (HasNonAsciiSymbol(password)) sb.Append("не-ASCII, ");
+
+    string result = sb.ToString();
+    if (result.Length == 0) return "нет символов";
+
+    return result.Substring(0, result.Length - 2);
+}
+
+// =====================================================================
+//  ШАГ 2. Стойкость в битах и словесная оценка
+// =====================================================================
+
+// Стойкость = длина × log2(размер алфавита).
+static double GetBits(string password)
+{
+    if (password.Length == 0) return 0;
+
+    return password.Length * Math.Log2(GetAlphabetSize(password));
+}
+
+static string GetRating(double bits)
+{
+    if (bits < 28) return "очень слабый";
+    if (bits < 36) return "слабый";
+    if (bits < 60) return "средний";
+    if (bits < 128) return "сильный";
+    return "очень сильный";
+}
+
+static ConsoleColor GetRatingColor(string rating)
+{
+    switch (rating)
+    {
+        case "очень слабый":
+        case "слабый":
+            return ConsoleColor.Red;
+        case "средний":
+            return ConsoleColor.Yellow;
+        default:
+            return ConsoleColor.Green;
+    }
+}
+
+// =====================================================================
+//  ШАГ 3. Время перебора
+// =====================================================================
+
+// Среднее время подбора: перебираем половину всех вариантов.
+static double GetAverageCrackSeconds(double bits, double guessesPerSecond)
+{
+    if (bits <= 0) return 0;
+    if (bits > 1000) return double.PositiveInfinity;   // double столько не хранит
+    return Math.Pow(2, bits) / 2 / guessesPerSecond;
+}
+
+// Секунды — в понятную человеку запись с правильными окончаниями.
+static string FormatSeconds(double seconds)
+{
+    const double SecondsPerYear = 365.25 * 24 * 60 * 60;
+    const double UniverseYears = 13.8e9;
+    const double UniverseSeconds = UniverseYears * SecondsPerYear;
+
+    if (double.IsNaN(seconds)) return "—";
+    if (double.IsPositiveInfinity(seconds) || seconds >= UniverseSeconds)
+        return "дольше возраста Вселенной (13,8 млрд лет)";
+
+    if (seconds < 1) return "мгновенно (меньше секунды)";
+    if (seconds < 60) return PluralValue(seconds, "секунда", "секунды", "секунд");
+    if (seconds < 3600) return PluralValue(seconds / 60, "минута", "минуты", "минут");
+    if (seconds < 86400) return PluralValue(seconds / 3600, "час", "часа", "часов");
+    if (seconds < SecondsPerYear) return PluralValue(seconds / 86400, "день", "дня", "дней");
+
+    double years = seconds / SecondsPerYear;
+    if (years < 1_000) return PluralValue(years, "год", "года", "лет");
+    if (years < 1_000_000) return Num(years / 1_000) + " тыс. лет";
+    if (years < 1_000_000_000) return Num(years / 1_000_000) + " млн лет";
+    return Num(years / 1_000_000_000) + " млрд лет";
+}
+
+// "1 год", "2 года", "5 лет": правильная форма слова после числа.
+static string PluralValue(double value, string one, string few, string many)
+{
+    bool big = value >= 100;
+    double shown = big ? Math.Round(value) : Math.Round(value, 1);
+    bool isWhole = Math.Abs(shown - Math.Round(shown)) < 0.001;
+
+    string number = isWhole ? Num(shown, 0) : Num(shown, 1);
+
+    // Дробное число всегда требует формы «2,5 года» (родительный падеж).
+    string word = isWhole ? Plural((long)Math.Round(shown), one, few, many) : few;
+
+    return number + " " + word;
+}
+
+// Выбор окончания по последним цифрам числа: 1 год, 2 года, 5 лет.
+static string Plural(long number, string one, string few, string many)
+{
+    long n = Math.Abs(number) % 100;
+    if (n >= 11 && n <= 14) return many;
+
+    n %= 10;
+    if (n == 1) return one;
+    if (n >= 2 && n <= 4) return few;
+    return many;
+}
+
+// Итоговый отчёт по одному паролю: длина, алфавит, биты, оценка, время.
+static void PrintPasswordReport(string password, string[] popular)
+{
+    const double FastSpeed = 10_000_000_000;   // быстрый хеш на видеокарте
+    const double SlowSpeed = 10_000;           // bcrypt/Argon2: в миллион раз медленнее
+
+    Console.WriteLine();
+    Console.WriteLine($"Длина пароля:    {password.Length}");
+
+    if (password.Length == 0)
+    {
+        Console.WriteLine("Пустой пароль: подбирать нечего, стойкость 0 бит.");
+        return;
+    }
+
+    // Словарная атака: если пароль в списке утечек, биты уже не спасают.
+    // Поэтому проверка словаря идёт раньше расчёта и отменяет его.
+    if (CheckPopular(password, popular))
+    {
+        PrintColored("ПАРОЛЬ ЕСТЬ В СПИСКЕ ПОПУЛЯРНЫХ — подбирается мгновенно.", ConsoleColor.Red);
+        Console.WriteLine("Оценку в битах для него не показываем: формула здесь только создаёт");
+        Console.WriteLine("ложное чувство защиты — этот пароль проверяют первым делом.");
+        return;
+    }
+
+    double bits = GetBits(password);
+
+    Console.WriteLine($"Размер алфавита: {GetAlphabetSize(password)} ({DescribeGroups(password)})");
+    if (HasNonAsciiSymbol(password))
+        Console.WriteLine("(символы вне ASCII считаются скопом: 33 строчные + 33 заглавные)");
+    Console.WriteLine($"Стойкость:       {Num(bits)} бит (длина × log2 алфавита)");
+
+    // Шаблонные пароли: формула их переоценивает, поэтому штрафуем.
+    string? pattern = FindPatternReason(password, popular);
+    double effectiveBits = bits;
+
+    if (pattern != null)
+    {
+        effectiveBits = ApplyPatternPenalty(bits, pattern);
+        Console.WriteLine();
+        PrintColored($"Шаблон: {pattern}.", ConsoleColor.Yellow);
+        Console.WriteLine($"Стойкость скорректирована: {Num(bits)} → {Num(effectiveBits)} бит.");
+    }
+
+    string rating = GetRating(effectiveBits);
+    Console.Write("Оценка:          ");
+    PrintColored(rating, GetRatingColor(rating));
+
+    Console.WriteLine($"Перебор при быстром хеше (10 млрд/с): {FormatSeconds(GetAverageCrackSeconds(effectiveBits, FastSpeed))}");
+    Console.WriteLine($"Перебор при медленном хеше (10 тыс/с): {FormatSeconds(GetAverageCrackSeconds(effectiveBits, SlowSpeed))}");
+}
+
+// =====================================================================
+//  ШАГ 4. Словарь популярных паролей и шаблоны
+// =====================================================================
+
+// Есть ли пароль в списке популярных (без учёта регистра).
+static bool CheckPopular(string password, string[] popular)
+{
+    string low = password.ToLowerInvariant();
+
+    foreach (string item in popular)
+    {
+        if (low == item) return true;
+    }
+    return false;
+}
+
+// Находит, по какому шаблону «придуман» пароль. null — шаблон не найден.
+static string? FindPatternReason(string password, string[] popular)
+{
+    if (password.Length < 4) return null;
+
+    string low = password.ToLowerInvariant();
+
+    if (IsSameCharRepeated(low))
+        return "пароль из одного повторяющегося символа";
+
+    if (IsPopularWordWithDigits(low, popular))
+        return "популярное слово с цифрами на конце";
+
+    if (HasAscendingRun(password, 4))
+        return "подряд идущие символы вроде 1234 или abcd";
+
+    if (HasKeyboardRun(low, 4))
+        return "ряд клавиш клавиатуры вроде qwerty или asdf";
+
+    if (HasYear(low))
+        return "год в составе пароля";
+
+    return null;
+}
+
+// Штраф зависит от шаблона: словарная атака на «слово + цифры» тратит
+// миллионы попыток, то есть около 20–22 бит, а пароль из одного символа —
+// это вообще один вариант, сколько бы раз он ни повторялся.
+static double ApplyPatternPenalty(double bits, string reason)
+{
+    switch (reason)
+    {
+        case "пароль из одного повторяющегося символа":
+            return Math.Min(bits, 6);                        // вариантов почти нет
+        case "популярное слово с цифрами на конце":
+            return Math.Max(1, bits - 30);                   // слово + перебор цифр
+        case "год в составе пароля":
+            return Math.Max(1, bits - 15);                   // год добавляет мало
+        default:
+            return Math.Max(1, bits - 25);                   // последовательности, ряды клавиш
+    }
+}
+
+// "aaaaaaaa" — все символы одинаковые.
+static bool IsSameCharRepeated(string s)
+{
+    if (s.Length < 2) return false;
+
+    for (int i = 1; i < s.Length; i++)
+    {
+        if (s[i] != s[0]) return false;
+    }
+    return true;
+}
+
+// "password123": отделяем цифры в конце и проверяем слово по словарю.
+static bool IsPopularWordWithDigits(string low, string[] popular)
+{
+    int end = low.Length;
+    while (end > 0 && low[end - 1] >= '0' && low[end - 1] <= '9')
+    {
+        end--;
+    }
+
+    int digits = low.Length - end;
+    if (digits == 0) return false;
+
+    string word = low.Substring(0, end);
+    if (word.Length < 3) return false;
+
+    return CheckPopular(word, popular);
+}
+
+// Четыре и больше символов подряд: "abcd", "1234", "9876".
+static bool HasAscendingRun(string s, int minRun)
+{
+    int up = 1;
+    int down = 1;
+
+    for (int i = 1; i < s.Length; i++)
+    {
+        up = (s[i] == s[i - 1] + 1) ? up + 1 : 1;
+        down = (s[i] == s[i - 1] - 1) ? down + 1 : 1;
+
+        if (up >= minRun || down >= minRun) return true;
+    }
+    return false;
+}
+
+// Четыре и больше символов идут подряд на клавиатуре: "qwer", "йцук".
+static bool HasKeyboardRun(string low, int minRun)
+{
+    string[] rows = { "qwertyuiop", "asdfghjkl", "zxcvbnm", "1234567890",
+                      "йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю" };
+
+    foreach (string row in rows)
+    {
+        for (int start = 0; start + minRun <= low.Length; start++)
+        {
+            string part = low.Substring(start, minRun);
+            if (row.Contains(part)) return true;
+        }
+    }
+    return false;
+}
+
+// Год в пароле: четыре цифры подряд от 1940 до 2035.
+static bool HasYear(string s)
+{
+    for (int i = 0; i + 4 <= s.Length; i++)
+    {
+        bool allDigits = true;
+        for (int k = 0; k < 4; k++)
+        {
+            if (s[i + k] < '0' || s[i + k] > '9') allDigits = false;
+        }
+        if (!allDigits) continue;
+
+        int value = int.Parse(s.Substring(i, 4));
+        if (value >= 1940 && value <= 2035) return true;
+    }
+    return false;
+}
+
+// =====================================================================
+//  ШАГ 5. Генератор паролей
+// =====================================================================
+
+// Наборы символов выбранных групп (пустые группы не попадают в массив).
+static string[] BuildGroups(bool useLower, bool useUpper, bool useDigits, bool useSymbols)
+{
+    int count = 0;
+    if (useLower) count++;
+    if (useUpper) count++;
+    if (useDigits) count++;
+    if (useSymbols) count++;
+
+    string[] groups = new string[count];
+    int i = 0;
+
+    if (useLower) groups[i++] = "abcdefghijklmnopqrstuvwxyz";
+    if (useUpper) groups[i++] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    if (useDigits) groups[i++] = "0123456789";
+    if (useSymbols) groups[i++] = "!@#$%^&*()-_=+[]{};:,.?/";
+
+    return groups;
+}
+
+// Пароль заданной длины: по одному символу каждой группы обязательно,
+// остальные — из общего алфавита, в конце перемешивание Фишера — Йетса.
+static string GeneratePassword(int length, string[] groups)
+{
+    if (groups.Length == 0 || length < groups.Length) return "";
+
+    StringBuilder alphabetBuilder = new StringBuilder();
+    foreach (string group in groups)
+    {
+        alphabetBuilder.Append(group);
+    }
+    string alphabet = alphabetBuilder.ToString();
+
+    char[] chars = new char[length];
+    int pos = 0;
+
+    // 1. Обязательные символы: по одному из каждой выбранной группы.
+    foreach (string group in groups)
+    {
+        chars[pos] = RandomChar(group);
+        pos++;
+    }
+
+    // 2. Остальные символы — из общего алфавита.
+    while (pos < length)
+    {
+        chars[pos] = RandomChar(alphabet);
+        pos++;
+    }
+
+    // 3. Перемешиваем, чтобы обязательные символы не стояли в начале.
+    Shuffle(chars);
+
+    return new string(chars);
+}
+
+// Один случайный символ из набора. Только криптостойкий генератор!
+static char RandomChar(string set)
+{
+    int index = RandomNumberGenerator.GetInt32(set.Length);
+    return set[index];
+}
+
+// Перемешивание Фишера — Йетса: каждая перестановка равновероятна.
+static void Shuffle(char[] array)
+{
+    for (int i = array.Length - 1; i > 0; i--)
+    {
+        int j = RandomNumberGenerator.GetInt32(i + 1);   // 0..i включительно
+        (array[i], array[j]) = (array[j], array[i]);
+    }
+}
+
+// Проверка: в пароле есть символы всех выбранных групп.
+static bool HasAllGroups(string password, string[] groups)
+{
+    foreach (string group in groups)
+    {
+        if (!HasCharFrom(password, group)) return false;
+    }
+    return true;
+}
+
+// =====================================================================
+//  ШАГ 6. Парольные фразы
+// =====================================================================
+
+// Фраза из заданного числа случайных слов через дефис.
+static string GeneratePassphrase(string[] dictionary, int wordCount)
+{
+    StringBuilder sb = new StringBuilder();
+
+    for (int i = 0; i < wordCount; i++)
+    {
+        if (i > 0) sb.Append('-');
+
+        int index = RandomNumberGenerator.GetInt32(dictionary.Length);
+        sb.Append(dictionary[index]);
+    }
+
+    return sb.ToString();
+}
+
+// Стойкость фразы: число слов × log2(размер словаря).
+static double GetPhraseBits(int wordCount, int dictionarySize)
+{
+    return wordCount * Math.Log2(dictionarySize);
+}
+
+// Сколько слов нужно, чтобы набрать targetBits.
+static int WordsNeededForBits(double targetBits, int dictionarySize)
+{
+    double bitsPerWord = Math.Log2(dictionarySize);
+    return (int)Math.Ceiling(targetBits / bitsPerWord);
+}
+
+// =====================================================================
+//  ПРОВЕРОЧНЫЕ РАСЧЁТЫ (пункт 4 меню, данные для отчёта)
+// =====================================================================
+
+static void PrintAlphabetChecks()
+{
+    Console.WriteLine("=== Шаг 1. Размер алфавита: проверки из задания ===");
+
+    string[] samples = { "49281736", "kot9vbr2", "Kot9!Vbr2#Xy7@Qw" };
+    string[] expected = { "только цифры, ожидаем 10", "строчные и цифры, ожидаем 36", "все четыре группы, ожидаем 95" };
+
+    for (int i = 0; i < samples.Length; i++)
+    {
+        Console.WriteLine($"  {samples[i],-18} {expected[i]} → {GetAlphabetSize(samples[i])}");
+    }
+}
+
+static void PrintTheoryTable()
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Шаги 1–2. Стойкость против таблицы из теории ===");
+    Console.WriteLine();
+    Console.WriteLine($"  {"Пароль",-18} {"Длина",-6} {"Алфавит",-8} {"Биты",-8} Теория");
+
+    string[] samples = { "49281736", "qvtrmzxa", "Kot9Vbr2", "Kot9Vbr2Xy7Q", "Kot9!Vbr2#Xy7@Qw" };
+    double[] theory = { 26.6, 37.6, 47.6, 71.5, 105.1 };
+
+    for (int i = 0; i < samples.Length; i++)
+    {
+        Console.WriteLine($"  {samples[i],-18} {samples[i].Length,-6} {GetAlphabetSize(samples[i]),-8} {Num(GetBits(samples[i])),-8} {Num(theory[i])}");
+    }
+}
+
+static void PrintSpeedComparison()
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Шаг 3. Время перебора при быстром и медленном хранении ===");
+    Console.WriteLine("Быстрый хеш: 10 млрд вариантов/с. Медленный (bcrypt/Argon2): 10 тыс./с.");
+    Console.WriteLine();
+
+    string[] names = { "8 цифр", "8 символов: 2 регистра и цифры", "8 символов: все группы",
+                       "12 символов: все группы", "16 символов: все группы" };
+    string[] samples = { "49281736", "Kot9Vbr2", "Kot9!Vbr", "Kot9!Vbr2#Xy7", "Kot9!Vbr2#Xy7@Qw" };
+
+    for (int i = 0; i < samples.Length; i++)
+    {
+        double bits = GetBits(samples[i]);
+        string fast = FormatSeconds(GetAverageCrackSeconds(bits, 10_000_000_000));
+        string slow = FormatSeconds(GetAverageCrackSeconds(bits, 10_000));
+
+        Console.WriteLine($"  {names[i]} ({samples[i]}), {Num(bits)} бит");
+        Console.WriteLine($"     быстрый хеш: {fast}");
+        Console.WriteLine($"     медленный:   {slow}");
+    }
+}
+
+static void PrintDictionaryChecks(string[] popular)
+{
+    Console.WriteLine();
+    Console.WriteLine($"=== Шаг 4. Словарь и шаблоны (в списке {popular.Length} паролей) ===");
+    Console.WriteLine();
+    Console.WriteLine("Пароль \"123456\" — точное попадание в словарь:");
+    PrintPasswordReport("123456", popular);
+
+    Console.WriteLine();
+    Console.WriteLine("Пароль \"Password123\" — в списке его нет, но он собран по шаблону:");
+    PrintPasswordReport("Password123", popular);
+}
+
+static void PrintPhraseChecks(string[] dictionary)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Шаг 6. Парольные фразы ===");
+    Console.WriteLine($"Словарь: {dictionary.Length} слов → {Num(Math.Log2(dictionary.Length), 2)} бита на слово.");
+    Console.WriteLine($"Пример фразы из 6 слов: {GeneratePassphrase(dictionary, 6)}");
+    Console.WriteLine();
+
+    int[] counts = { 4, 6, 8, 10, 11 };
+    foreach (int words in counts)
+    {
+        Console.WriteLine($"  {words} {Plural(words, "слово", "слова", "слов")} → {Num(GetPhraseBits(words, dictionary.Length))} бит");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("Нужно слов для 71,5 бита (случайный пароль из 12 символов):");
+    Console.WriteLine($"  словарь {dictionary.Length} слов → {WordsNeededForBits(71.5, dictionary.Length)} слов");
+    Console.WriteLine($"  Diceware 7776 слов → {WordsNeededForBits(71.5, 7776)} слов");
+}
+
+static void PrintGeneratorCheck()
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Шаг 5. Генератор: десять паролей, все группы ===");
+
+    string[] groups = BuildGroups(true, true, true, true);
+    int complete = 0;
+
+    for (int i = 1; i <= 10; i++)
+    {
+        string password = GeneratePassword(12, groups);
+        bool ok = HasAllGroups(password, groups);
+        if (ok) complete++;
+
+        Console.WriteLine($"  {i,2}) {password,-16} {Num(GetBits(password))} бит  {(ok ? "все 4 группы" : "группа потерялась")}");
+    }
+
+    Console.WriteLine($"Итого: {complete} из 10 паролей содержат символы всех выбранных групп.");
+}
